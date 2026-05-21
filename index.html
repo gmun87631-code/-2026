@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>가위바위보 생존전</title>
+  <meta name="description" content="다수결 판정과 시장 투표가 있는 가위바위보 생존 게임" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <main class="app">
+    <header class="header">
+      <div class="title">
+        <span class="eyebrow">다수결 생존 아레나</span>
+        <h1>가위바위보 생존전</h1>
+        <p>가장 많이 선택된 패가 기준 패가 되고, 그 기준 패에게 지는 패를 낸 참가자가 탈락합니다.</p>
+      </div>
+
+      <div class="toolbar" aria-label="게임 조작">
+        <button type="button" id="patchNotesButton" class="icon-button">
+          <span aria-hidden="true">i</span>
+          <span>패치노트</span>
+        </button>
+        <button type="button" id="musicButton" class="icon-button" aria-pressed="false">
+          <span aria-hidden="true">♪</span>
+          <span>BGM 켜기</span>
+        </button>
+      </div>
+    </header>
+
+    <section class="status-bar" aria-label="게임 상태">
+      <article class="status-card">
+        <div class="status-label">라운드</div>
+        <div class="status-value" id="roundValue">1</div>
+      </article>
+      <article class="status-card">
+        <div class="status-label">생존자</div>
+        <div class="status-value" id="aliveValue">10</div>
+      </article>
+      <article class="status-card">
+        <div class="status-label">현재 시장</div>
+        <div class="status-value status-mayor" id="mayorValue">없음</div>
+      </article>
+      <article class="status-card">
+        <div class="status-label">상태</div>
+        <div class="status-value status-phase" id="phaseValue">대기</div>
+      </article>
+    </section>
+
+    <section class="main-grid">
+      <section class="panel arena-panel">
+        <div class="panel-head">
+          <div>
+            <span class="eyebrow" id="stageEyebrow">게임 준비</span>
+            <h2 id="stageTitle">시장 투표를 시작하세요</h2>
+          </div>
+          <button type="button" id="startButton" class="primary-action">시작</button>
+        </div>
+
+        <section class="lobby-panel" id="lobbyPanel">
+          <div class="lobby-copy">
+            <strong>로비</strong>
+            <span>AI를 추가하거나 오른쪽 친구 목록에서 친구를 초대해 참가자를 채우세요.</span>
+          </div>
+          <div class="lobby-actions">
+            <button type="button" id="addAiButton">AI 추가</button>
+            <span id="lobbyCount">1 / 20</span>
+          </div>
+        </section>
+
+        <section class="vote-panel" id="votePanel" hidden>
+          <div class="vote-copy">
+            <strong>시장 투표 단계</strong>
+            <span>본인에게는 투표할 수 없습니다. 시장은 동률 상황에서 기준 패를 결정합니다.</span>
+          </div>
+          <div class="vote-grid" id="voteGrid" aria-label="시장 후보"></div>
+        </section>
+
+        <section class="secret-panel" id="secretPanel">
+          <div class="secret-title" id="secretTitle">비밀 후계자</div>
+          <div class="secret-text" id="secretText">비밀 후계자 지정 전입니다.</div>
+        </section>
+
+        <section class="successor-panel" id="successorPanel" hidden>
+          <div class="vote-copy">
+            <strong>비밀 후계자 지정</strong>
+            <span id="successorHint">후계자로 지정할 생존자 2명을 선택하세요.</span>
+          </div>
+          <div class="vote-grid" id="successorGrid" aria-label="후계자 후보"></div>
+          <button type="button" id="confirmSuccessorsButton" class="primary-action">후계자 확정</button>
+        </section>
+
+        <section class="inspector-panel" id="inspectorPanel" hidden>
+          <div class="vote-copy">
+            <strong>암살자 권한</strong>
+            <span id="inspectorHint">대상과 직업을 추리한 뒤 암살을 실행하세요.</span>
+          </div>
+          <div class="vote-grid" id="inspectorGrid" aria-label="암살 대상"></div>
+          <div class="assassin-role-grid" id="assassinRoleGrid" aria-label="암살 직업 추리"></div>
+          <button type="button" id="confirmAssassinationButton" class="primary-action">암살 실행</button>
+        </section>
+
+        <section class="revolution-panel" id="revolutionPanel" hidden>
+          <div class="vote-copy">
+            <strong id="revolutionTitle">혁명가 권한</strong>
+            <span id="revolutionHint">대상을 선택하세요.</span>
+          </div>
+          <div class="vote-grid" id="revolutionGrid" aria-label="혁명가 대상"></div>
+          <button type="button" id="confirmRevolutionButton" class="primary-action">확정</button>
+        </section>
+
+        <section class="grace-panel" id="gracePanel" hidden>
+          <div class="vote-copy">
+            <strong>신의 은총</strong>
+            <span id="graceHint">즉시 탈락시킬 생존자 1명을 선택하세요.</span>
+          </div>
+          <div class="vote-grid" id="graceGrid" aria-label="신의 은총 대상"></div>
+          <button type="button" id="confirmGraceButton" class="primary-action">신의 은총 실행</button>
+        </section>
+
+        <section class="maestro-panel" id="maestroPanel" hidden>
+          <div class="vote-copy">
+            <strong>최면 지휘</strong>
+            <span id="maestroHint">이번 라운드에 조종할 생존자 1명을 선택하세요.</span>
+          </div>
+          <div class="vote-grid" id="maestroGrid" aria-label="최면 지휘 대상"></div>
+        </section>
+
+        <section class="shaman-panel" id="shamanPanel" hidden>
+          <div class="vote-copy">
+            <strong id="shamanTitle">주술사</strong>
+            <span id="shamanHint">주술 대상을 선택하세요.</span>
+          </div>
+          <div class="vote-grid" id="shamanGrid" aria-label="주술 대상"></div>
+          <button type="button" id="confirmShamanButton" class="primary-action">확정</button>
+        </section>
+
+        <section class="cupid-panel" id="cupidPanel" hidden>
+          <div class="vote-copy">
+            <strong>애인 지정</strong>
+            <span id="cupidHint">애인으로 묶을 생존자 2명을 선택하세요.</span>
+          </div>
+          <div class="vote-grid" id="cupidGrid" aria-label="애인 지정 대상"></div>
+          <button type="button" id="confirmCupidButton" class="primary-action">애인 지정</button>
+        </section>
+
+        <section class="sheriff-panel" id="sheriffPanel" hidden>
+          <div class="vote-copy">
+            <strong>정의 집행</strong>
+            <span id="sheriffHint">정의 집행할 생존자 1명을 선택하세요.</span>
+          </div>
+          <div class="vote-grid" id="sheriffGrid" aria-label="정의 집행 대상"></div>
+          <button type="button" id="confirmSheriffButton" class="primary-action">정의 집행</button>
+        </section>
+
+        <section class="choice-panel" id="choicePanel">
+          <div class="choice-grid" id="choiceGrid" aria-label="가위바위보 선택"></div>
+
+          <div class="battle-strip">
+            <div class="battle-slot" id="playerPick">
+              <span class="slot-label">나의 선택</span>
+              <span class="slot-symbol">?</span>
+            </div>
+            <div class="versus">기준</div>
+            <div class="battle-slot" id="basePick">
+              <span class="slot-label">기준 패</span>
+              <span class="slot-symbol">?</span>
+            </div>
+          </div>
+        </section>
+
+        <div class="result-banner" id="resultBanner">
+          시작 버튼을 누르면 시장 투표 후 생존전이 시작됩니다.
+        </div>
+      </section>
+
+      <aside class="panel side-panel">
+        <div class="panel-head compact">
+          <div>
+            <span class="eyebrow">참가자</span>
+            <h2>생존 현황</h2>
+          </div>
+        </div>
+        <div class="player-grid" id="playerGrid"></div>
+
+        <section class="friend-panel" aria-label="친구 목록">
+          <div class="panel-head compact friend-head">
+            <div>
+              <span class="eyebrow">친구</span>
+              <h2>친구 목록</h2>
+            </div>
+          </div>
+          <form class="friend-form" id="friendForm">
+            <label class="sr-only" for="friendInput">친구 이름</label>
+            <input id="friendInput" maxlength="16" autocomplete="off" placeholder="친구 이름" />
+            <button type="submit">추가</button>
+          </form>
+          <div class="friend-list" id="friendList"></div>
+        </section>
+      </aside>
+    </section>
+
+    <section class="log-box">
+      <div class="panel-head compact">
+        <div>
+          <span class="eyebrow">기록</span>
+          <h2>전투 로그</h2>
+        </div>
+      </div>
+      <div class="log-list" id="logList"></div>
+    </section>
+
+    <section class="patch-modal" id="patchModal" aria-label="패치노트" role="dialog" aria-modal="true" hidden>
+      <div class="patch-card">
+        <div class="patch-head">
+          <div>
+            <span class="eyebrow">업데이트</span>
+            <h2>패치노트</h2>
+          </div>
+          <button type="button" id="closePatchButton" class="friend-remove" aria-label="패치노트 닫기">×</button>
+        </div>
+        <div class="patch-version">v2.3 보안관 업데이트</div>
+        <ul class="patch-list">
+          <li>신규 비밀 직업 보안관을 추가했습니다.</li>
+          <li>보안관은 한 판에 한 번 정의 집행으로 생존자 1명의 실제 직업 성향을 판정합니다.</li>
+          <li>시민 편을 지목하면 보안관만 탈락하고, 중립을 지목하면 두 플레이어가 함께 탈락합니다.</li>
+          <li>위험 직업을 지목하면 대상만 탈락합니다.</li>
+          <li>시장과 후계자는 직업이 아닌 지위로 처리되어 보안관 판정 기준에서 제외됩니다.</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="victory-modal" id="victoryModal" aria-label="승리" role="dialog" aria-modal="true" hidden>
+      <div class="victory-card">
+        <span class="eyebrow">게임 종료</span>
+        <h2 id="victoryTitle">승리</h2>
+        <p id="victoryText">최후의 생존자가 탄생했습니다.</p>
+        <button type="button" id="closeVictoryButton" class="primary-action">확인</button>
+      </div>
+    </section>
+
+    <section class="resistance-modal" id="resistanceModal" aria-label="최면 저항전" role="dialog" aria-modal="true" hidden>
+      <div class="resistance-card">
+        <span class="eyebrow">마에스트로</span>
+        <h2 id="resistanceTitle">최면 저항전!</h2>
+        <p id="resistanceText">최면에 맞서 연타하세요.</p>
+        <div class="resistance-timer" id="resistanceTimer">5</div>
+        <div class="resistance-bars">
+          <div>
+            <span>최면</span>
+            <strong id="maestroTapCount">0</strong>
+          </div>
+          <div>
+            <span>저항</span>
+            <strong id="targetTapCount">0</strong>
+          </div>
+        </div>
+        <button type="button" id="resistanceTapButton" class="primary-action">연타</button>
+      </div>
+    </section>
+
+    <section class="curse-modal" id="curseModal" aria-label="사망 선고" role="dialog" aria-modal="true" hidden>
+      <div class="curse-card">
+        <span class="eyebrow">금지된 주술</span>
+        <h2 id="curseTitle">넌 이미 죽어있다.</h2>
+        <p id="curseText">종소리가 울립니다.</p>
+      </div>
+    </section>
+  </main>
+
+  <script src="game.js"></script>
+</body>
+</html>
