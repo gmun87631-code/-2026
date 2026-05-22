@@ -453,6 +453,7 @@ class SurvivalGame {
     this.voteGrid = document.getElementById("voteGrid");
     this.playerGrid = document.getElementById("playerGrid");
     this.logList = document.getElementById("logList");
+    this.playerNameValue = document.getElementById("playerNameValue");
     this.roundValue = document.getElementById("roundValue");
     this.aliveValue = document.getElementById("aliveValue");
     this.mayorValue = document.getElementById("mayorValue");
@@ -533,6 +534,8 @@ class SurvivalGame {
     this.courtHint = document.getElementById("courtHint");
     this.courtGrid = document.getElementById("courtGrid");
     this.confirmCourtButton = document.getElementById("confirmCourtButton");
+    this.nicknameForm = document.getElementById("nicknameForm");
+    this.nicknameInput = document.getElementById("nicknameInput");
     this.friendForm = document.getElementById("friendForm");
     this.friendInput = document.getElementById("friendInput");
     this.friendList = document.getElementById("friendList");
@@ -640,6 +643,11 @@ class SurvivalGame {
       const playing = await this.bgm.toggle();
       this.addLog(playing ? "BGM이 재생 중입니다." : "BGM을 껐습니다.");
       this.renderMusicButton();
+    });
+
+    this.nicknameForm.addEventListener("submit", (event) => {
+      event.preventDefault();
+      this.changeNickname(this.nicknameInput.value);
     });
 
     this.friendForm.addEventListener("submit", (event) => {
@@ -750,6 +758,7 @@ class SurvivalGame {
     }];
     if (clearLogs) this.logs = [];
     if (!this.logs.length) this.addLog("로비 준비 완료. AI를 추가하거나 친구를 초대하세요.", true);
+    if (this.nicknameInput) this.nicknameInput.value = this.human().name;
   }
 
   startElection(message) {
@@ -2799,6 +2808,34 @@ class SurvivalGame {
     return this.players.length >= MAX_PLAYERS;
   }
 
+  changeNickname(value) {
+    if (!this.canEditLobby()) {
+      this.addLog("닉네임은 로비에서만 변경할 수 있습니다.");
+      this.render();
+      return;
+    }
+
+    const name = String(value || "").trim().slice(0, 16);
+    if (!name) {
+      this.addLog("닉네임을 입력하세요.");
+      this.render();
+      return;
+    }
+
+    const duplicate = this.players.some((player) => player.id !== this.human().id && player.name.toLowerCase() === name.toLowerCase());
+    if (duplicate) {
+      this.addLog(`${name}은 이미 사용 중인 이름입니다.`);
+      this.render();
+      return;
+    }
+
+    const previous = this.human().name;
+    this.human().name = name;
+    this.nicknameInput.value = name;
+    this.addLog(`${previous}에서 ${name}으로 닉네임을 변경했습니다.`, true);
+    this.render();
+  }
+
   addAiPlayer() {
     if (this.phase !== "waiting") return;
     if (this.lobbyFull()) {
@@ -2956,6 +2993,7 @@ class SurvivalGame {
   render() {
     const alive = this.alivePlayers();
     const mayor = this.playerById(this.mayorId);
+    this.playerNameValue.textContent = this.human().name;
     this.roundValue.textContent = this.round;
     this.aliveValue.textContent = alive.length;
     const mayorDisabled = this.phase !== "waiting" && this.phase !== "over" && alive.length <= 2;
@@ -2963,6 +3001,8 @@ class SurvivalGame {
     this.phaseValue.textContent = this.phaseText();
     this.lobbyCount.textContent = `${this.players.length} / ${MAX_PLAYERS}`;
     this.addAiButton.disabled = this.phase !== "waiting" || this.lobbyFull();
+    this.nicknameInput.disabled = !this.canEditLobby();
+    this.nicknameForm.querySelector("button").disabled = !this.canEditLobby();
     this.renderStage();
     this.renderSecretInfo();
     this.renderMusicButton();

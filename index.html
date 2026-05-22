@@ -30,6 +30,10 @@
 
     <section class="status-bar" aria-label="게임 상태">
       <article class="status-card">
+        <div class="status-label">내 이름</div>
+        <div class="status-value status-player" id="playerNameValue">나</div>
+      </article>
+      <article class="status-card">
         <div class="status-label">라운드</div>
         <div class="status-value" id="roundValue">1</div>
       </article>
@@ -62,6 +66,11 @@
             <strong>로비</strong>
             <span>AI를 추가하거나 오른쪽 친구 목록에서 친구를 초대해 참가자를 채우세요.</span>
           </div>
+          <form class="nickname-form" id="nicknameForm">
+            <label class="sr-only" for="nicknameInput">닉네임</label>
+            <input id="nicknameInput" maxlength="16" autocomplete="off" placeholder="닉네임" />
+            <button type="submit">닉네임 변경</button>
+          </form>
           <div class="lobby-actions">
             <button type="button" id="addAiButton">AI 추가</button>
             <span id="lobbyCount">1 / 20</span>

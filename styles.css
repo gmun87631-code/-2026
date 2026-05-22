@@ -133,7 +133,7 @@ input {
 
 .status-bar {
   display: grid;
-  grid-template-columns: repeat(4, minmax(140px, 1fr));
+  grid-template-columns: repeat(5, minmax(120px, 1fr));
   gap: 12px;
   margin-bottom: 18px;
 }
@@ -238,7 +238,14 @@ input {
   gap: 10px;
 }
 
+.nickname-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
 .lobby-actions button,
+.nickname-form button,
 .friend-invite {
   min-height: 40px;
   border-radius: 8px;
@@ -256,6 +263,10 @@ input {
 
 .lobby-actions button {
   padding: 0 14px;
+}
+
+.nickname-form button {
+  padding: 0 13px;
 }
 
 .lobby-actions span {
