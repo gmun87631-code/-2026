@@ -30,7 +30,7 @@ const CHOICES = {
 
 const CHOICE_ORDER = ["scissors", "rock", "paper"];
 const MAX_PLAYERS = 20;
-const PATCH_VERSION = "2.3";
+const PATCH_VERSION = "2.5";
 const AI_NAMES = [
   "민준",
   "서연",
@@ -116,7 +116,9 @@ function resolveMajorityRound({ players, mayorId, protectedIds = [], anonymousMa
     let eliminatedIds = [];
     let reason = "최종 2인전에서는 시장 권한을 사용하지 않습니다.";
 
-    if (first.pick === second.pick) {
+    if (!first.pick || !second.pick) {
+      reason = "최종 2인전에서 선택하지 않은 참가자가 있어 아무도 탈락하지 않습니다.";
+    } else if (first.pick === second.pick) {
       reason = "최종 2인전에서 두 참가자가 같은 패를 냈으므로 아무도 탈락하지 않습니다.";
     } else if (CHOICES[first.pick].beats === second.pick) {
       baseChoice = first.pick;
@@ -409,6 +411,30 @@ class SurvivalGame {
     this.sheriffAssigned = false;
     this.sheriffPowerUsed = false;
     this.pendingSheriffTargetId = null;
+    this.clownId = null;
+    this.clownAssigned = false;
+    this.clownFailures = 0;
+    this.clownIsJoker = false;
+    this.clownPredictionRound = null;
+    this.clownPrediction = null;
+    this.pendingClownPrediction = {};
+    this.judgeId = null;
+    this.prosecutorId = null;
+    this.defenderId = null;
+    this.courtAssigned = false;
+    this.courtActive = false;
+    this.defendantId = null;
+    this.acquittedIds = [];
+    this.prosecutorSuccesses = 0;
+    this.defenderSuccesses = 0;
+    this.defenderFailures = 0;
+    this.pendingCourtDefendantId = null;
+    this.courtTimer = null;
+    this.courtSecondsLeft = 0;
+    this.prosecutorPick = null;
+    this.defenderPick = null;
+    this.guiltyIds = [];
+    this.innocentIds = [];
     this.logs = [];
     this.lastResult = null;
     this.lastPlayerPick = null;
@@ -497,6 +523,16 @@ class SurvivalGame {
     this.sheriffHint = document.getElementById("sheriffHint");
     this.sheriffGrid = document.getElementById("sheriffGrid");
     this.confirmSheriffButton = document.getElementById("confirmSheriffButton");
+    this.clownPanel = document.getElementById("clownPanel");
+    this.clownHint = document.getElementById("clownHint");
+    this.clownGrid = document.getElementById("clownGrid");
+    this.confirmClownButton = document.getElementById("confirmClownButton");
+    this.skipClownButton = document.getElementById("skipClownButton");
+    this.courtPanel = document.getElementById("courtPanel");
+    this.courtTitle = document.getElementById("courtTitle");
+    this.courtHint = document.getElementById("courtHint");
+    this.courtGrid = document.getElementById("courtGrid");
+    this.confirmCourtButton = document.getElementById("confirmCourtButton");
     this.friendForm = document.getElementById("friendForm");
     this.friendInput = document.getElementById("friendInput");
     this.friendList = document.getElementById("friendList");
@@ -562,6 +598,23 @@ class SurvivalGame {
 
     this.confirmSheriffButton.addEventListener("click", () => {
       this.useSheriffJustice();
+    });
+
+    this.confirmClownButton.addEventListener("click", () => {
+      this.confirmClownPrediction();
+    });
+
+    this.skipClownButton.addEventListener("click", () => {
+      this.submitClownRoundWithoutPick();
+    });
+
+    this.confirmCourtButton.addEventListener("click", () => {
+      if (this.phase === "choosing" && (this.human().id === this.defendantId || this.isCourtRole(this.human()))) {
+        this.assignRoundPicks(null);
+        this.prepareRoundResolution();
+        return;
+      }
+      this.confirmCourtDefendant();
     });
 
     document.addEventListener("keydown", (event) => {
@@ -657,6 +710,30 @@ class SurvivalGame {
     this.sheriffAssigned = false;
     this.sheriffPowerUsed = false;
     this.pendingSheriffTargetId = null;
+    this.clownId = null;
+    this.clownAssigned = false;
+    this.clownFailures = 0;
+    this.clownIsJoker = false;
+    this.clownPredictionRound = null;
+    this.clownPrediction = null;
+    this.pendingClownPrediction = {};
+    this.judgeId = null;
+    this.prosecutorId = null;
+    this.defenderId = null;
+    this.courtAssigned = false;
+    this.courtActive = false;
+    this.defendantId = null;
+    this.acquittedIds = [];
+    this.prosecutorSuccesses = 0;
+    this.defenderSuccesses = 0;
+    this.defenderFailures = 0;
+    this.pendingCourtDefendantId = null;
+    this.courtSecondsLeft = 0;
+    this.prosecutorPick = null;
+    this.defenderPick = null;
+    this.guiltyIds = [];
+    this.innocentIds = [];
+    this.clearCourtTimer();
     this.clearCupidTimer();
     this.lastResult = null;
     this.lastPlayerPick = null;
@@ -694,6 +771,12 @@ class SurvivalGame {
     this.assignShaman();
     this.assignCupid();
     this.assignSheriff();
+    this.assignClown();
+    this.assignCourtRoles();
+    if (this.beginCourtDefendantSelection(() => {
+      if (this.beginCupidSelectionIfNeeded(() => this.continueAfterCupidSetup())) return;
+      this.continueAfterCupidSetup();
+    })) return;
     if (this.beginCupidSelectionIfNeeded(() => this.continueAfterCupidSetup())) return;
     this.continueAfterCupidSetup();
   }
@@ -756,6 +839,219 @@ class SurvivalGame {
     this.sheriffAssigned = true;
   }
 
+  assignClown() {
+    if (this.clownAssigned) return;
+    const excluded = this.secretJobHolderIds();
+    const candidates = this.alivePlayers().filter((player) => !excluded.has(player.id));
+    const clown = candidates[Math.floor(Math.random() * candidates.length)];
+    this.clownId = clown?.id ?? null;
+    this.clownAssigned = true;
+  }
+
+  assignCourtRoles() {
+    if (this.courtAssigned) return;
+    const candidates = this.shuffle(this.alivePlayers().filter((player) => !this.secretJobHolderIds().has(player.id)));
+    this.judgeId = candidates[0]?.id ?? null;
+    this.prosecutorId = candidates[1]?.id ?? null;
+    this.defenderId = candidates[2]?.id ?? null;
+    this.courtAssigned = true;
+    this.courtActive = [this.judgeId, this.prosecutorId, this.defenderId].every((id) => id !== null && id !== undefined);
+  }
+
+  courtRoleIds() {
+    return [this.judgeId, this.prosecutorId, this.defenderId].filter((id) => id !== null && id !== undefined);
+  }
+
+  isCourtRole(player) {
+    return this.courtRoleIds().includes(player?.id);
+  }
+
+  courtDefendantCandidates() {
+    const excluded = new Set([...this.courtRoleIds(), ...this.acquittedIds]);
+    return this.alivePlayers().filter((player) => !excluded.has(player.id));
+  }
+
+  courtSystemAlive() {
+    return this.courtActive && this.courtRoleIds().every((id) => this.playerById(id)?.alive);
+  }
+
+  beginCourtDefendantSelection(afterSelection = null) {
+    if (!this.courtSystemAlive() || this.defendantId !== null) return false;
+    const candidates = this.courtDefendantCandidates();
+    if (!candidates.length) {
+      this.endCourtSystem();
+      return false;
+    }
+
+    const judge = this.playerById(this.judgeId);
+    if (!judge?.isHuman) {
+      this.setCourtDefendant(this.shuffle(candidates)[0].id);
+      if (afterSelection) afterSelection();
+      return true;
+    }
+
+    this.phase = "courtSelect";
+    this.pendingCourtDefendantId = null;
+    this.courtSecondsLeft = 10;
+    this.courtAfterSelection = afterSelection;
+    this.startCourtTimer();
+    this.render();
+    return true;
+  }
+
+  startCourtTimer() {
+    this.clearCourtTimer();
+    this.courtTimer = window.setInterval(() => {
+      this.courtSecondsLeft -= 1;
+      if (this.courtSecondsLeft <= 0) {
+        const candidate = this.shuffle(this.courtDefendantCandidates())[0];
+        if (candidate) this.setCourtDefendant(candidate.id);
+        const after = this.courtAfterSelection;
+        this.courtAfterSelection = null;
+        if (after) after();
+      }
+      this.render();
+    }, 1000);
+  }
+
+  clearCourtTimer() {
+    if (!this.courtTimer) return;
+    window.clearInterval(this.courtTimer);
+    this.courtTimer = null;
+  }
+
+  selectCourtDefendant(targetId) {
+    if (this.phase !== "courtSelect") return;
+    const target = this.playerById(targetId);
+    if (!target?.alive || !this.courtDefendantCandidates().some((player) => player.id === target.id)) return;
+    this.pendingCourtDefendantId = target.id;
+    this.render();
+  }
+
+  confirmCourtDefendant() {
+    if (this.phase !== "courtSelect" || !this.pendingCourtDefendantId) return;
+    this.setCourtDefendant(this.pendingCourtDefendantId);
+    const after = this.courtAfterSelection;
+    this.courtAfterSelection = null;
+    if (after) after();
+    else this.phase = "choosing";
+    this.render();
+  }
+
+  setCourtDefendant(targetId) {
+    const target = this.playerById(targetId);
+    if (!target?.alive) return false;
+    this.clearCourtTimer();
+    this.defendantId = target.id;
+    this.pendingCourtDefendantId = null;
+    this.addLog(`${target.name}님이 피고로 지목되었습니다.`, true);
+    return true;
+  }
+
+  endCourtSystem() {
+    if (!this.courtActive) return;
+    this.courtActive = false;
+    this.defendantId = null;
+    this.prosecutorPick = null;
+    this.defenderPick = null;
+    this.clearCourtTimer();
+    this.addLog("법정이 붕괴되었습니다.", true);
+  }
+
+  applyCourtVerdict(result) {
+    this.guiltyIds = [];
+    this.innocentIds = [];
+    if (!this.courtSystemAlive() || !this.defendantId) return;
+    const defendant = this.playerById(this.defendantId);
+    if (!defendant?.alive) return;
+    this.ensureCourtPicks();
+    this.applyCourtDefendantPick();
+    if (this.prosecutorPick === this.defenderPick) {
+      if (!result.eliminatedIds.includes(defendant.id)) result.eliminatedIds.push(defendant.id);
+      this.prosecutorSuccesses += 1;
+      this.defenderFailures += 1;
+      this.guiltyIds.push(defendant.id);
+      this.addLog("검사의 기소가 성공했습니다.", true);
+    } else {
+      this.addLog("변호인의 변론이 성공했습니다.", true);
+    }
+  }
+
+  finalizeCourtAfterRound() {
+    if (!this.courtActive) return false;
+    if (!this.courtSystemAlive()) {
+      this.endCourtSystem();
+      return false;
+    }
+    const defendant = this.playerById(this.defendantId);
+    if (!defendant) return false;
+
+    if (!defendant.alive) {
+      const alreadyCountedGuilty = this.guiltyIds.includes(defendant.id);
+      if (!alreadyCountedGuilty) this.defenderFailures += 1;
+      this.guiltyIds = [...new Set([...this.guiltyIds, defendant.id])];
+      this.addLog(`피고 ${defendant.name}님은 유죄 판결을 받고 탈락했습니다.`, true);
+    } else {
+      this.defenderSuccesses += 1;
+      this.innocentIds = [defendant.id];
+      this.acquittedIds = [...new Set([...this.acquittedIds, defendant.id])];
+      this.addLog(`피고 ${defendant.name}님은 무죄 판결을 받았습니다.`, true);
+      this.addLog(`${defendant.name}님은 다시 피고로 지정될 수 없습니다.`, true);
+    }
+
+    this.defendantId = null;
+    this.prosecutorPick = null;
+    this.defenderPick = null;
+
+    if (this.defenderFailures >= 3) {
+      const defender = this.playerById(this.defenderId);
+      this.addLog("변호사가 피고를 지키지 못해 탈락했습니다.", true);
+      this.applyImmediateEliminations([defender?.id], false);
+      this.endCourtSystem();
+      return true;
+    }
+
+    if (this.defenderSuccesses >= 3) {
+      this.addLog("변호사가 각성하여 판사와 검사를 무너뜨렸습니다.", true);
+      this.applyImmediateEliminations([this.judgeId, this.prosecutorId], false);
+      this.endCourtSystem();
+      return true;
+    }
+
+    if (this.prosecutorSuccesses >= 3) {
+      this.addLog("검사가 세 번의 기소에 성공했습니다.", true);
+      this.addLog("최종 판결전이 시작됩니다.", true);
+      this.resolveFinalCourtDuel();
+      return true;
+    }
+
+    return false;
+  }
+
+  resolveFinalCourtDuel() {
+    const judge = this.playerById(this.judgeId);
+    const prosecutor = this.playerById(this.prosecutorId);
+    if (!judge?.alive || !prosecutor?.alive) {
+      this.endCourtSystem();
+      return;
+    }
+    let judgePick = null;
+    let prosecutorPick = null;
+    for (let i = 0; i < 8; i += 1) {
+      judgePick = this.randomChoice();
+      prosecutorPick = this.randomChoice();
+      if (judgePick !== prosecutorPick) break;
+    }
+    if (judgePick === prosecutorPick || CHOICES[judgePick].beats === prosecutorPick) {
+      this.addLog("판사가 최종 판결전에서 승리했습니다. 검사가 탈락했습니다.", true);
+      this.applyImmediateEliminations([prosecutor.id], false);
+    } else {
+      this.addLog("검사가 최종 판결전에서 승리했습니다. 판사가 탈락했습니다.", true);
+      this.applyImmediateEliminations([judge.id], false);
+    }
+    this.endCourtSystem();
+  }
+
   secretJobHolderIds() {
     return new Set([
       this.revolutionaryId,
@@ -763,6 +1059,10 @@ class SurvivalGame {
       this.shamanId,
       this.cupidId,
       this.sheriffId,
+      this.clownId,
+      this.judgeId,
+      this.prosecutorId,
+      this.defenderId,
       ...this.assassinIds,
     ].filter((id) => id !== null && id !== undefined));
   }
@@ -915,6 +1215,49 @@ class SurvivalGame {
     return true;
   }
 
+  evaluateClownPrediction() {
+    const clown = this.playerById(this.clownId);
+    if (!clown?.alive || this.clownIsJoker || this.clownPrediction?.round !== this.round) return false;
+
+    const entries = Object.entries(this.clownPrediction.predictions);
+    if (!entries.length) return false;
+
+    const correctCount = entries.reduce((count, [id, expectedAlive]) => {
+      const player = this.playerById(Number(id));
+      return count + (Boolean(player?.alive) === expectedAlive ? 1 : 0);
+    }, 0);
+
+    if (correctCount === entries.length) {
+      this.phase = "over";
+      this.addLog("삐에로가 모든 운명을 맞히고 승리했습니다.", true);
+      this.showSpecialVictory("삐에로 승리", `${clown.name}님 승리 · 모든 운명이 무대 위에서 밝혀졌습니다.`);
+      this.render();
+      return true;
+    }
+
+    const jokerThreshold = Math.ceil(entries.length / 2);
+    if (correctCount >= jokerThreshold) {
+      this.clownIsJoker = true;
+      this.clownPrediction = null;
+      this.pendingClownPrediction = {};
+      this.addLog("누군가가 운명의 흐름을 읽었습니다.", true);
+      if (clown.isHuman) this.addLog("당신은 조커로 변신했습니다.", true);
+      return false;
+    }
+
+    this.clownFailures += 1;
+    this.addLog("누군가의 예측이 빗나갔습니다.", true);
+    this.clownPrediction = null;
+    this.pendingClownPrediction = {};
+
+    if (this.clownFailures >= 3) {
+      this.addLog("삐에로의 무대가 막을 내렸습니다.", true);
+      this.applyImmediateEliminations([clown.id], false);
+    }
+
+    return this.phase === "over";
+  }
+
   randomCandidateBlockTargetId() {
     const targets = this.alivePlayers().filter((player) => player.id !== this.revolutionaryId);
     return targets[Math.floor(Math.random() * targets.length)]?.id ?? null;
@@ -1001,13 +1344,101 @@ class SurvivalGame {
 
   choose(choice) {
     if (this.phase !== "choosing" || !this.human().alive) return;
+    this.assignRoundPicks(choice);
+    this.prepareRoundResolution();
+  }
 
+  assignRoundPicks(humanChoice = null) {
     this.players.forEach((player) => {
       if (!player.alive) return;
-      player.pick = player.isHuman ? choice : this.randomChoice();
+      if (player.isHuman) {
+        player.pick = this.canSkipRps(player) ? null : humanChoice;
+      } else if (this.canSkipRps(player)) {
+        player.pick = null;
+      } else {
+        player.pick = this.randomChoice();
+      }
     });
+    this.ensureCourtPicks();
+    this.applyCourtDefendantPick();
+  }
 
+  canSkipRps(player) {
+    return player?.alive && (
+      player.id === this.clownId
+      || (this.courtSystemAlive() && this.isCourtRole(player))
+    );
+  }
+
+  ensureCourtPicks() {
+    if (!this.courtSystemAlive() || !this.defendantId) return;
+    const prosecutor = this.playerById(this.prosecutorId);
+    const defender = this.playerById(this.defenderId);
+    if (!this.prosecutorPick || !prosecutor?.isHuman) this.prosecutorPick = this.prosecutorPick || this.randomChoice();
+    if (!this.defenderPick || !defender?.isHuman) this.defenderPick = this.defenderPick || this.randomChoice();
+  }
+
+  applyCourtDefendantPick() {
+    if (!this.courtSystemAlive() || !this.defendantId) return false;
+    const defendant = this.playerById(this.defendantId);
+    if (!defendant?.alive || !this.defenderPick) return false;
+    defendant.pick = this.defenderPick;
+    return true;
+  }
+
+  submitClownRoundWithoutPick() {
+    const human = this.human();
+    if (this.phase !== "choosing" || !human.alive || !this.canSkipRps(human)) return;
+    this.assignRoundPicks(null);
     this.prepareRoundResolution();
+  }
+
+  clownPredictionTargets() {
+    const clown = this.playerById(this.clownId);
+    return this.alivePlayers().filter((player) => player.id !== clown?.id);
+  }
+
+  setClownPrediction(targetId, expectedAlive) {
+    const human = this.human();
+    if (this.phase !== "choosing" || human.id !== this.clownId || this.clownIsJoker) return;
+    if (this.clownPredictionRound === this.round) return;
+    const target = this.playerById(targetId);
+    if (!target?.alive || target.id === human.id) return;
+    this.pendingClownPrediction = {
+      ...this.pendingClownPrediction,
+      [target.id]: expectedAlive,
+    };
+    this.render();
+  }
+
+  confirmClownPrediction() {
+    const human = this.human();
+    if (this.phase !== "choosing" || human.id !== this.clownId || this.clownIsJoker) return;
+    if (this.clownPredictionRound === this.round) return;
+    const targets = this.clownPredictionTargets();
+    const hasAllPredictions = targets.every((target) => typeof this.pendingClownPrediction[target.id] === "boolean");
+    if (!hasAllPredictions || !targets.length) return;
+    this.clownPrediction = {
+      round: this.round,
+      predictions: Object.fromEntries(targets.map((target) => [target.id, this.pendingClownPrediction[target.id]])),
+    };
+    this.clownPredictionRound = this.round;
+    this.addLog("누군가가 운명을 예측했습니다.", true);
+    this.render();
+  }
+
+  ensureAiClownPrediction() {
+    const clown = this.playerById(this.clownId);
+    if (!clown?.alive || clown.isHuman || this.clownIsJoker || this.clownPredictionRound === this.round) return;
+    const targets = this.clownPredictionTargets();
+    if (!targets.length) return;
+    const predictions = {};
+    targets.forEach((target) => {
+      predictions[target.id] = Math.random() > 0.35;
+    });
+    this.clownPrediction = { round: this.round, predictions };
+    this.clownPredictionRound = this.round;
+    this.addLog("누군가가 운명을 예측했습니다.", true);
   }
 
   prepareRoundResolution() {
@@ -1020,11 +1451,14 @@ class SurvivalGame {
     }
 
     this.applyMaestroHypnosis();
+    this.ensureCourtPicks();
+    this.applyCourtDefendantPick();
     this.resolveRound();
   }
 
   runAiPreRoundAbilities() {
     if (this.phase !== "choosing") return;
+    this.ensureAiClownPrediction();
 
     const revolutionary = this.playerById(this.revolutionaryId);
     if (revolutionary?.alive && !revolutionary.isHuman && this.canUseRevolutionPower(revolutionary) && this.mayorId !== null) {
@@ -1232,6 +1666,7 @@ class SurvivalGame {
     if (anonymousMayorWasEliminated) {
       result.eliminatedIds = result.eliminatedIds.filter((id) => id !== this.anonymousMayorId);
     }
+    this.applyCourtVerdict(result);
 
     if (this.maybeStartFateExchange(result, anonymousMayorWasEliminated)) return;
     this.finishRoundResult(result, anonymousMayorWasEliminated);
@@ -1251,6 +1686,8 @@ class SurvivalGame {
       this.resolveSuccessionDuel(result);
     }
     if (this.processCupidLoverDeaths()) return;
+    if (this.evaluateClownPrediction()) return;
+    if (this.finalizeCourtAfterRound()) return;
 
     const mayorWasEliminated = this.mayorId !== null
       && (result.eliminatedIds.includes(this.mayorId) || !this.playerById(this.mayorId)?.alive);
@@ -1286,6 +1723,7 @@ class SurvivalGame {
       this.lastPlayerPick = null;
       this.maestroTargetId = null;
       this.lastHypnosisApplied = false;
+      this.pendingClownPrediction = {};
 
       if (mayorWasEliminated && !this.mayorSystemGone) {
         this.resolveSuccessionAfterMayorDeath();
@@ -1300,6 +1738,12 @@ class SurvivalGame {
         this.phase = "choosing";
       }
       if (this.phase === "choosing" && this.beginCupidSelectionIfNeeded(() => {
+        this.phase = "choosing";
+        this.render();
+      })) {
+        return;
+      }
+      if (this.phase === "choosing" && this.beginCourtDefendantSelection(() => {
         this.phase = "choosing";
         this.render();
       })) {
@@ -1562,7 +2006,7 @@ class SurvivalGame {
 
       if (this.phase === "choosing") {
         this.players.forEach((player) => {
-          if (player.alive) player.pick = this.randomChoice();
+          if (player.alive) player.pick = this.canSkipRps(player) ? null : this.randomChoice();
         });
         this.prepareRoundResolution();
       }
@@ -1624,6 +2068,7 @@ class SurvivalGame {
       if (this.successorIds.includes(this.human().id)) {
         this.addLog("당신은 비밀 후계자로 지정되었습니다.", true);
       }
+      this.checkJokerSuccessorVictory();
     } else {
       this.addLog("지정할 수 있는 비밀 후계자가 없습니다.");
     }
@@ -1644,6 +2089,7 @@ class SurvivalGame {
   }
 
   finishSuccessorAssignment() {
+    if (this.phase === "over") return;
     if (!this.assassinsAssigned) this.assignAssassins();
     this.phase = "choosing";
   }
@@ -1678,8 +2124,21 @@ class SurvivalGame {
     this.pendingSuccessorIds = [];
     const count = this.successorIds.length;
     if (count > 0) this.addLog(`시장이 비밀 후계자 ${count}명을 지정했습니다.`, true);
+    if (this.checkJokerSuccessorVictory()) {
+      this.render();
+      return;
+    }
     this.finishSuccessorAssignment();
     this.render();
+  }
+
+  checkJokerSuccessorVictory() {
+    const joker = this.playerById(this.clownId);
+    if (!this.clownIsJoker || !joker?.alive || !this.successorIds.includes(joker.id)) return false;
+    this.phase = "over";
+    this.addLog("조커가 왕좌의 뒤편에 숨어들어 승리했습니다.", true);
+    this.showSpecialVictory("조커 승리", `${joker.name}님이 왕좌의 뒤편에 숨어들었습니다.`);
+    return true;
   }
 
   successorCandidates() {
@@ -1695,6 +2154,10 @@ class SurvivalGame {
       this.shamanId,
       this.cupidId,
       this.sheriffId,
+      this.clownId,
+      this.judgeId,
+      this.prosecutorId,
+      this.defenderId,
       ...this.successorIds,
     ]);
     const candidates = this.alivePlayers().filter((player) => !excludedIds.has(player.id));
@@ -1734,6 +2197,16 @@ class SurvivalGame {
 
     if (this.hasSheriffRole()) {
       roles.splice(1, 0, { key: "sheriff", label: "보안관" });
+    }
+
+    if (this.hasClownRole()) {
+      roles.splice(1, 0, { key: this.clownIsJoker ? "joker" : "clown", label: this.clownIsJoker ? "조커" : "삐에로" });
+    }
+
+    if (this.hasCourtRole()) {
+      roles.splice(1, 0, { key: "judge", label: "판사" });
+      roles.splice(1, 0, { key: "prosecutor", label: "검사" });
+      roles.splice(1, 0, { key: "defender", label: "변호사" });
     }
 
     return roles;
@@ -1779,6 +2252,22 @@ class SurvivalGame {
     ));
   }
 
+  hasClownRole() {
+    return this.clownAssigned || this.players.some((player) => (
+      ["clown", "joker"].includes(player.role)
+      || ["clown", "joker"].includes(player.job)
+      || ["clown", "joker"].includes(player.roleKey)
+    ));
+  }
+
+  hasCourtRole() {
+    return this.courtAssigned || this.players.some((player) => (
+      ["judge", "prosecutor", "defender"].includes(player.role)
+      || ["judge", "prosecutor", "defender"].includes(player.job)
+      || ["judge", "prosecutor", "defender"].includes(player.roleKey)
+    ));
+  }
+
   actualRoleKey(player) {
     if (!player?.alive) return null;
     if (player.id === this.revolutionaryId && !this.revolutionPowerUsed) return "revolutionary";
@@ -1786,6 +2275,10 @@ class SurvivalGame {
     if (player.id === this.shamanId && !this.shamanSpent) return "shaman";
     if (player.id === this.cupidId) return "cupid";
     if (player.id === this.sheriffId) return "sheriff";
+    if (player.id === this.clownId) return this.clownIsJoker ? "joker" : "clown";
+    if (player.id === this.judgeId) return "judge";
+    if (player.id === this.prosecutorId) return "prosecutor";
+    if (player.id === this.defenderId) return "defender";
     if (this.assassinIds.includes(player.id)) return "assassin";
     if (player.role === "revolutionary" || player.job === "revolutionary" || player.roleKey === "revolutionary") {
       return "revolutionary";
@@ -1802,6 +2295,15 @@ class SurvivalGame {
     if (player.role === "sheriff" || player.job === "sheriff" || player.roleKey === "sheriff") {
       return "sheriff";
     }
+    if (player.role === "joker" || player.job === "joker" || player.roleKey === "joker") {
+      return "joker";
+    }
+    if (player.role === "clown" || player.job === "clown" || player.roleKey === "clown") {
+      return "clown";
+    }
+    if (["judge", "prosecutor", "defender"].includes(player.role)) return player.role;
+    if (["judge", "prosecutor", "defender"].includes(player.job)) return player.job;
+    if (["judge", "prosecutor", "defender"].includes(player.roleKey)) return player.roleKey;
     return "civilian";
   }
 
@@ -1811,14 +2313,17 @@ class SurvivalGame {
     if (player.id === this.shamanId && !this.shamanSpent) return "danger";
     if (player.id === this.cupidId) return "danger";
     if (this.assassinIds.includes(player.id)) return "danger";
+    if (player.id === this.clownId) return this.clownIsJoker ? "danger" : "danger";
     if (player.id === this.maestroId) return "neutral";
+    if ([this.judgeId, this.prosecutorId, this.defenderId].includes(player.id)) return "neutral";
     if (player.id === this.sheriffId) return "civilian";
 
     const role = player.role || player.job || player.roleKey;
-    if (["revolutionary", "assassin", "shaman", "cupid", "thief", "esper", "pierrot", "joker"].includes(role)) {
+    if (["revolutionary", "assassin", "shaman", "cupid", "thief", "esper", "pierrot", "joker", "clown"].includes(role)) {
       return "danger";
     }
     if (["maestro", "prophet"].includes(role)) return "neutral";
+    if (["judge", "prosecutor", "defender"].includes(role)) return "neutral";
 
     // 확장용: 꽃미남이 치명적 유혹으로 연인을 만든 상태라면 danger, 아니라면 neutral로 분기하면 된다.
     if (role === "heartthrob") return player.hasFatalLover ? "danger" : "neutral";
@@ -1880,6 +2385,9 @@ class SurvivalGame {
     });
     this.playEliminationSound();
     this.successorIds = this.successorIds.filter((id) => this.playerById(id)?.alive);
+    if (this.courtActive && uniqueIds.some((id) => this.courtRoleIds().includes(id))) {
+      this.endCourtSystem();
+    }
 
     if (uniqueIds.includes(this.anonymousMayorId)) {
       this.startFinalEdict();
@@ -2184,6 +2692,11 @@ class SurvivalGame {
     const isShaman = viewer?.alive && viewer.id === this.shamanId;
     const isCupid = viewer?.alive && viewer.id === this.cupidId;
     const isSheriff = viewer?.alive && viewer.id === this.sheriffId;
+    const isClown = viewer?.alive && viewer.id === this.clownId && !this.clownIsJoker;
+    const isJoker = viewer?.alive && viewer.id === this.clownId && this.clownIsJoker;
+    const isJudge = viewer?.alive && viewer.id === this.judgeId;
+    const isProsecutor = viewer?.alive && viewer.id === this.prosecutorId;
+    const isDefender = viewer?.alive && viewer.id === this.defenderId;
 
     return {
       isMayor,
@@ -2195,6 +2708,11 @@ class SurvivalGame {
       isShaman,
       isCupid,
       isSheriff,
+      isClown,
+      isJoker,
+      isJudge,
+      isProsecutor,
+      isDefender,
     };
   }
 
@@ -2457,6 +2975,8 @@ class SurvivalGame {
     this.renderShamanAction();
     this.renderCupidAction();
     this.renderSheriffAction();
+    this.renderClownAction();
+    this.renderCourtAction();
     this.renderChoices();
     this.renderBattleSlots();
     this.renderPlayers();
@@ -2477,7 +2997,8 @@ class SurvivalGame {
       || this.phase === "resistance"
       || this.phase === "fateSwap"
       || this.phase === "deathSentence"
-      || this.phase === "cupidSelect";
+      || this.phase === "cupidSelect"
+      || this.phase === "courtSelect";
 
     if (this.phase === "waiting") {
       this.stageEyebrow.textContent = "로비";
@@ -2562,6 +3083,15 @@ class SurvivalGame {
       return;
     }
 
+    if (this.phase === "courtSelect") {
+      this.stageEyebrow.textContent = "법정";
+      this.stageTitle.textContent = "피고를 지정하세요";
+      this.startButton.textContent = "피고 지정 중";
+      this.startButton.disabled = true;
+      this.resultBanner.textContent = `피고 지정 남은 시간: ${this.courtSecondsLeft}초`;
+      return;
+    }
+
     if (this.phase === "over") {
       this.stageEyebrow.textContent = "게임 종료";
       this.stageTitle.textContent = "생존전이 끝났습니다";
@@ -2640,6 +3170,47 @@ class SurvivalGame {
       this.secretText.textContent = this.sheriffPowerUsed
         ? "당신은 보안관입니다. 정의 집행 사용 완료"
         : "당신은 보안관입니다. 정의 집행 사용 가능";
+      return;
+    }
+
+    if (viewerRoles.isJoker) {
+      this.secretTitle.textContent = "조커";
+      this.secretText.textContent = "당신은 조커입니다. 시장이 당신을 후계자로 선택하면 승리합니다.";
+      return;
+    }
+
+    if (viewerRoles.isClown) {
+      this.secretTitle.textContent = "삐에로";
+      this.secretText.textContent = `당신은 삐에로입니다. 예측 실패: ${this.clownFailures} / 3`;
+      return;
+    }
+
+    if (viewerRoles.isJudge) {
+      const prosecutor = this.playerById(this.prosecutorId);
+      const defender = this.playerById(this.defenderId);
+      const defendant = this.playerById(this.defendantId);
+      this.secretTitle.textContent = "판사";
+      this.secretText.textContent = `당신은 판사입니다. 검사: ${prosecutor?.name || "없음"} / 변호사: ${defender?.name || "없음"} · 현재 피고: ${defendant?.name || "없음"}`;
+      return;
+    }
+
+    if (viewerRoles.isProsecutor) {
+      const defendant = this.playerById(this.defendantId);
+      this.secretTitle.textContent = "검사";
+      this.secretText.textContent = `당신은 검사입니다. 현재 피고: ${defendant?.name || "없음"} · 기소 성공: ${this.prosecutorSuccesses} / 3`;
+      return;
+    }
+
+    if (viewerRoles.isDefender) {
+      const defendant = this.playerById(this.defendantId);
+      this.secretTitle.textContent = "변호사";
+      this.secretText.textContent = `당신은 변호사입니다. 현재 피고: ${defendant?.name || "없음"} · 변호 성공: ${this.defenderSuccesses} / 3 · 변호 실패: ${this.defenderFailures} / 3`;
+      return;
+    }
+
+    if (human?.alive && human.id === this.defendantId) {
+      this.secretTitle.textContent = "피고";
+      this.secretText.textContent = "당신은 피고로 지목되었습니다. 당신의 최종 선택은 변호사의 선택으로 결정됩니다.";
       return;
     }
 
@@ -2930,6 +3501,103 @@ class SurvivalGame {
     })));
   }
 
+  renderClownAction() {
+    this.clownGrid.innerHTML = "";
+    const human = this.human();
+    const canUse = human?.alive && human.id === this.clownId && !this.clownIsJoker && this.phase === "choosing";
+    this.clownPanel.hidden = !canUse;
+    if (!canUse) return;
+
+    const locked = this.clownPredictionRound === this.round;
+    const targets = this.clownPredictionTargets();
+    const prediction = locked ? this.clownPrediction?.predictions || {} : this.pendingClownPrediction;
+    const complete = targets.length > 0 && targets.every((target) => typeof prediction[target.id] === "boolean");
+
+    this.clownHint.textContent = locked
+      ? `이번 라운드 운명 예측 확정 · 예측 실패: ${this.clownFailures} / 3`
+      : `각 생존자의 라운드 종료 상태를 예측하세요. 예측 실패: ${this.clownFailures} / 3`;
+    this.confirmClownButton.disabled = locked || !complete;
+    this.skipClownButton.disabled = false;
+
+    targets.forEach((target) => {
+      const row = document.createElement("div");
+      row.className = "prediction-card";
+      const expected = prediction[target.id];
+      row.innerHTML = `
+        <span class="vote-name">${this.escape(target.name)}</span>
+        <div class="prediction-actions">
+          <button type="button" class="${expected === true ? "selected" : ""}" ${locked ? "disabled" : ""}>생존 예상</button>
+          <button type="button" class="${expected === false ? "selected" : ""}" ${locked ? "disabled" : ""}>탈락 예상</button>
+        </div>
+      `;
+      const buttons = row.querySelectorAll("button");
+      buttons[0].addEventListener("click", () => this.setClownPrediction(target.id, true));
+      buttons[1].addEventListener("click", () => this.setClownPrediction(target.id, false));
+      this.clownGrid.append(row);
+    });
+  }
+
+  renderCourtAction() {
+    this.courtGrid.innerHTML = "";
+    this.courtPanel.hidden = true;
+    const human = this.human();
+
+    if (this.phase === "courtSelect" && human.id === this.judgeId && human.alive) {
+      this.courtPanel.hidden = false;
+      this.courtTitle.textContent = "피고 지정";
+      this.courtHint.textContent = `피고로 지정할 생존자 1명을 선택하세요. 남은 시간: ${this.courtSecondsLeft}초`;
+      this.confirmCourtButton.hidden = false;
+      this.confirmCourtButton.textContent = "피고 지정";
+      this.confirmCourtButton.disabled = !this.pendingCourtDefendantId;
+      this.courtDefendantCandidates().forEach((target) => this.courtGrid.append(this.createTargetButton({
+        target,
+        selected: this.pendingCourtDefendantId === target.id,
+        selectedText: "피고 선택됨",
+        idleText: "피고 후보",
+        onClick: () => this.selectCourtDefendant(target.id),
+      })));
+      return;
+    }
+
+    const isProsecutor = human.id === this.prosecutorId && human.alive && this.courtSystemAlive() && this.phase === "choosing";
+    const isDefender = human.id === this.defenderId && human.alive && this.courtSystemAlive() && this.phase === "choosing";
+    if (human.id === this.defendantId && human.alive && this.courtSystemAlive() && this.phase === "choosing") {
+      this.courtPanel.hidden = false;
+      this.courtTitle.textContent = "피고";
+      this.courtHint.textContent = "당신의 최종 선택은 변호사의 선택으로 결정됩니다.";
+      this.confirmCourtButton.hidden = false;
+      this.confirmCourtButton.textContent = "라운드 진행";
+      this.confirmCourtButton.disabled = false;
+      return;
+    }
+    if (!isProsecutor && !isDefender) return;
+
+    this.courtPanel.hidden = false;
+    this.courtTitle.textContent = isProsecutor ? "검사 선택" : "변호사 선택";
+    this.courtHint.textContent = isProsecutor
+      ? "피고의 최종 패를 맞히기 위해 패를 선택하세요."
+      : "피고에게 적용할 최종 패를 선택하세요.";
+    this.confirmCourtButton.hidden = false;
+    this.confirmCourtButton.textContent = "라운드 진행";
+    this.confirmCourtButton.disabled = false;
+    const currentPick = isProsecutor ? this.prosecutorPick : this.defenderPick;
+    CHOICE_ORDER.forEach((choice) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = `vote-card ${currentPick === choice ? "selected" : ""}`;
+      button.innerHTML = `
+        <span class="vote-name">${choiceSymbol(choice)} ${choiceName(choice)}</span>
+        <span class="vote-meta">${currentPick === choice ? "선택됨" : "법정 선택"}</span>
+      `;
+      button.addEventListener("click", () => {
+        if (isProsecutor) this.prosecutorPick = choice;
+        if (isDefender) this.defenderPick = choice;
+        this.render();
+      });
+      this.courtGrid.append(button);
+    });
+  }
+
   createTargetButton({ target, selected, selectedText, idleText, onClick }) {
     const button = document.createElement("button");
     button.type = "button";
@@ -2995,7 +3663,10 @@ class SurvivalGame {
       button.type = "button";
       button.className = `choice-card ${this.lastPlayerPick === choice ? "selected" : ""}`;
       button.style.setProperty("--accent", info.color);
-      button.disabled = this.phase !== "choosing" || !this.human().alive;
+      button.disabled = this.phase !== "choosing"
+        || !this.human().alive
+        || this.canSkipRps(this.human())
+        || (this.courtSystemAlive() && this.human().id === this.defendantId);
       button.innerHTML = `
         <span class="choice-symbol">${info.symbol}</span>
         <span class="choice-name">${info.name}</span>
@@ -3036,10 +3707,20 @@ class SurvivalGame {
       div.className = `player-card ${player.alive ? "" : "out"} ${showMayor ? "mayor" : ""} ${loveDeath ? "love-death" : ""}`;
       if (!player.alive) div.dataset.outLabel = loveDeath ? "애인 탈락" : "탈락";
       const pick = this.shouldHideRoundPicksFromHuman() ? "?" : player.pick ? choiceSymbol(player.pick) : "·";
+      const courtBadge = player.id === this.defendantId && player.alive
+        ? '<span class="mayor-badge court-badge">피고</span>'
+        : "";
+      const verdictBadge = this.guiltyIds.includes(player.id)
+        ? '<span class="mayor-badge guilty-badge">유죄</span>'
+        : this.innocentIds.includes(player.id)
+          ? '<span class="mayor-badge innocent-badge">무죄</span>'
+          : "";
       div.innerHTML = `
         <div class="player-top">
           <span class="player-name">${this.escape(player.name)}</span>
           ${showMayor ? '<span class="mayor-badge">시장</span>' : ""}
+          ${courtBadge}
+          ${verdictBadge}
           <span class="player-pick">${pick}</span>
         </div>
         <div class="player-state">
@@ -3063,6 +3744,10 @@ class SurvivalGame {
     if (player.id === this.shamanId && !this.shamanSpent) return "주술사";
     if (player.id === this.cupidId) return "큐피트";
     if (player.id === this.sheriffId) return "보안관";
+    if (player.id === this.clownId) return this.clownIsJoker ? "조커" : "삐에로";
+    if (player.id === this.judgeId) return "판사";
+    if (player.id === this.prosecutorId) return "검사";
+    if (player.id === this.defenderId) return "변호사";
     if (this.assassinIds.includes(player.id)) return "암살자";
     return "일반 플레이어";
   }
@@ -3132,6 +3817,7 @@ class SurvivalGame {
       fateSwap: "운명 교환",
       deathSentence: "사망 선고",
       cupidSelect: "애인 지정",
+      courtSelect: "피고 지정",
       resistance: "최면 저항전",
       choosing: "선택",
       reveal: "공개",

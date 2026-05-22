@@ -153,6 +153,27 @@
           <button type="button" id="confirmSheriffButton" class="primary-action">정의 집행</button>
         </section>
 
+        <section class="clown-panel" id="clownPanel" hidden>
+          <div class="vote-copy">
+            <strong>운명 예측</strong>
+            <span id="clownHint">이번 라운드의 생존과 탈락을 예측하세요.</span>
+          </div>
+          <div class="prediction-grid" id="clownGrid" aria-label="운명 예측 대상"></div>
+          <div class="clown-actions">
+            <button type="button" id="confirmClownButton" class="primary-action">운명 예측 확정</button>
+            <button type="button" id="skipClownButton" class="secondary-action">가위바위보 없이 라운드 진행</button>
+          </div>
+        </section>
+
+        <section class="court-panel" id="courtPanel" hidden>
+          <div class="vote-copy">
+            <strong id="courtTitle">법정</strong>
+            <span id="courtHint">법정 대상을 선택하세요.</span>
+          </div>
+          <div class="vote-grid" id="courtGrid" aria-label="법정 선택"></div>
+          <button type="button" id="confirmCourtButton" class="primary-action">확정</button>
+        </section>
+
         <section class="choice-panel" id="choicePanel">
           <div class="choice-grid" id="choiceGrid" aria-label="가위바위보 선택"></div>
 
@@ -219,13 +240,13 @@
           </div>
           <button type="button" id="closePatchButton" class="friend-remove" aria-label="패치노트 닫기">×</button>
         </div>
-        <div class="patch-version">v2.3 보안관 업데이트</div>
+        <div class="patch-version">v2.5 법정 업데이트</div>
         <ul class="patch-list">
-          <li>신규 비밀 직업 보안관을 추가했습니다.</li>
-          <li>보안관은 한 판에 한 번 정의 집행으로 생존자 1명의 실제 직업 성향을 판정합니다.</li>
-          <li>시민 편을 지목하면 보안관만 탈락하고, 중립을 지목하면 두 플레이어가 함께 탈락합니다.</li>
-          <li>위험 직업을 지목하면 대상만 탈락합니다.</li>
-          <li>시장과 후계자는 직업이 아닌 지위로 처리되어 보안관 판정 기준에서 제외됩니다.</li>
+          <li>신규 비밀 직업 판사, 검사, 변호사를 추가했습니다.</li>
+          <li>법정 유지 중 판사/검사/변호사는 다수결 가위바위보에서 제외됩니다.</li>
+          <li>판사는 피고를 지정하고, 변호사의 선택이 피고의 최종 패로 적용됩니다.</li>
+          <li>검사가 피고의 패를 맞히면 유죄, 피고가 살아남으면 무죄 판결을 받습니다.</li>
+          <li>변호 성공/실패와 검사 기소 성공 누적에 따라 법정 붕괴와 최종 판결전이 발생합니다.</li>
         </ul>
       </div>
     </section>
